@@ -1,130 +1,177 @@
+-- AIMBOT PEGADO PARA Blox Fruits (Hard Lock)
+-- Recomendado solo para pruebas privadas.
+
+-- Servicios
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
-local UserInputService = game:GetService("UserInputService")
+local Mouse = LocalPlayer:GetMouse()
 
--- Configuración inicial
-local aimlockEnabled = false
-local FOV = 1000
-local smoothness = 0.3
-local lineThickness = 2
-local lineColor = Color3.fromRGB(255,0,0)
+-- Configuración
+local enabled = false
+local FOV = 1000 -- Radio en píxeles
+local targetPartName = "Head" -- "Head" o "HumanoidRootPart"
+local showLine = true
 
--- Crear Drawing Line
-local line = Drawing.new("Line")
-line.Visible = false
-line.Color = lineColor
-line.Thickness = lineThickness
-
--- Función para encontrar enemigo más cercano
-local function getClosestEnemy()
-	local closestPlayer = nil
-	local shortestDistance = FOV
-
-	for _, player in pairs(Players:GetPlayers()) do
-		if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-			local screenPos, onScreen = Camera:WorldToViewportPoint(player.Character.HumanoidRootPart.Position)
-			if onScreen then
-				local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-				local distance = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
-				if distance < shortestDistance then
-					shortestDistance = distance
-					closestPlayer = player
-				end
-			end
-		end
-	end
-
-	return closestPlayer
+-- Función para mostrar logs
+local function log(msg)
+    if rconsoleprint then
+        rconsoleprint("[AimLock] "..tostring(msg).."\n")
+    else
+        print("[AimLock] "..tostring(msg))
+    end
 end
 
--- Actualizar Aimlock
-RunService.RenderStepped:Connect(function()
-	if aimlockEnabled then
-		local target = getClosestEnemy()
-		if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
-			local root = target.Character.HumanoidRootPart
-			local screenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
-			if onScreen then
-				local mouse = LocalPlayer:GetMouse()
-				local targetPos = Vector2.new(screenPos.X, screenPos.Y)
-				local mousePos = Vector2.new(mouse.X, mouse.Y)
-				local newPos = mousePos:Lerp(targetPos, smoothness)
-				mouse.X = newPos.X
-				mouse.Y = newPos.Y
+-- Esperar a que la cámara y el jugador estén listos
+repeat task.wait() until Camera and LocalPlayer
 
-				line.From = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-				line.To = targetPos
-				line.Visible = true
-			else
-				line.Visible = false
-			end
-		else
-			line.Visible = false
-		end
-	else
-		line.Visible = false
-	end
+log("Player y cámara listos.")
+
+-- Dibujar la línea (si Drawing está disponible)
+local drawLine
+if pcall(function() return Drawing end) then
+    local success, err = pcall(function()
+        drawLine = Drawing.new("Line")
+        drawLine.Visible = false
+        drawLine.Color = Color3.fromRGB(255,0,0)
+        drawLine.Thickness = 2
+    end)
+    if not success then
+        drawLine = nil
+        log("Warning: No se pudo crear la línea. Error: "..tostring(err))
+    end
+end
+
+-- Función para encontrar el objetivo más cercano
+local function getClosestTarget()
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local best = nil
+    local bestDist = FOV
+    
+    -- Buscar los jugadores cercanos
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild(targetPartName) then
+            local part = player.Character:FindFirstChild(targetPartName)
+            if part then
+                local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                if onScreen then
+                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+                    if dist < bestDist then
+                        bestDist = dist
+                        best = {player = player, part = part, screen = Vector2.new(screenPos.X, screenPos.Y)}
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+-- Apuntar y bloquear en el objetivo (hard-lock)
+local aimConn
+aimConn = RunService.RenderStepped:Connect(function()
+    if not enabled then
+        if drawLine then drawLine.Visible = false end
+        return
+    end
+
+    local target = getClosestTarget()
+    if target and target.player and target.part then
+        -- Ajustamos la cámara para mirar al objetivo
+        local camPos = Camera.CFrame.Position
+        local aimCFrame = CFrame.new(camPos, target.part.Position)
+        Camera.CFrame = aimCFrame
+
+        -- Dibujar línea al objetivo (opcional)
+        if drawLine and showLine then
+            drawLine.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+            drawLine.To = target.screen
+            drawLine.Visible = true
+        end
+    else
+        if drawLine then drawLine.Visible = false end
+    end
 end)
 
--- Crear GUI
-if game.CoreGui:FindFirstChild("AimlockMenu") then
-	game.CoreGui.AimlockMenu:Destroy()
-end
+-- GUI simple para activar/desactivar y configurar
+if game.CoreGui:FindFirstChild("AimLockGUI") then game.CoreGui.AimLockGUI:Destroy() end
+local sg = Instance.new("ScreenGui", game.CoreGui)
+sg.Name = "AimLockGUI"
 
-local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
-ScreenGui.Name = "AimlockMenu"
+local frame = Instance.new("Frame", sg)
+frame.Size = UDim2.new(0, 220, 0, 150)
+frame.Position = UDim2.new(0.7, 0, 0.05, 0)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true
 
-local Frame = Instance.new("Frame", ScreenGui)
-Frame.Size = UDim2.new(0, 200, 0, 120)
-Frame.Position = UDim2.new(0.05,0,0.6,0)
-Frame.BackgroundColor3 = Color3.fromRGB(30,30,30)
-Frame.Active = true
-Frame.Draggable = true
-Frame.BorderSizePixel = 0
+local title = Instance.new("TextLabel", frame)
+title.Size = UDim2.new(1, 0, 0, 28)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+title.Text = "🎯 AimLock"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 18
 
-local Title = Instance.new("TextLabel", Frame)
-Title.Size = UDim2.new(1,0,0,30)
-Title.BackgroundColor3 = Color3.fromRGB(45,45,45)
-Title.Text = "🎯 Aimlock"
-Title.TextColor3 = Color3.fromRGB(255,255,255)
-Title.Font = Enum.Font.SourceSansBold
-Title.TextSize = 18
-
--- Botón activar/desactivar
-local toggleBtn = Instance.new("TextButton", Frame)
-toggleBtn.Size = UDim2.new(1,-10,0,30)
-toggleBtn.Position = UDim2.new(0,5,0,40)
-toggleBtn.Text = "Activar Aimlock"
-toggleBtn.BackgroundColor3 = Color3.fromRGB(70,130,180)
-toggleBtn.TextColor3 = Color3.fromRGB(255,255,255)
+local toggleBtn = Instance.new("TextButton", frame)
+toggleBtn.Size = UDim2.new(1, -10, 0, 30)
+toggleBtn.Position = UDim2.new(0, 5, 0, 34)
+toggleBtn.Text = "Activar AimLock"
 toggleBtn.Font = Enum.Font.SourceSansBold
-toggleBtn.TextSize = 16
-toggleBtn.MouseButton1Click:Connect(function()
-	aimlockEnabled = not aimlockEnabled
-	toggleBtn.Text = aimlockEnabled and "Desactivar Aimlock" or "Activar Aimlock"
-end)
+toggleBtn.TextSize = 14
+toggleBtn.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 
--- Barra para ajustar FOV
-local fovLabel = Instance.new("TextLabel", Frame)
-fovLabel.Size = UDim2.new(1,-10,0,20)
-fovLabel.Position = UDim2.new(0,5,0,80)
-fovLabel.Text = "FOV: "..FOV
-fovLabel.TextColor3 = Color3.fromRGB(255,255,255)
+local partLabel = Instance.new("TextLabel", frame)
+partLabel.Size = UDim2.new(1, -10, 0, 20)
+partLabel.Position = UDim2.new(0, 5, 0, 70)
+partLabel.BackgroundTransparency = 1
+partLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+partLabel.Text = "Parte: " .. targetPartName
+
+local switchPartBtn = Instance.new("TextButton", frame)
+switchPartBtn.Size = UDim2.new(1, -10, 0, 22)
+switchPartBtn.Position = UDim2.new(0, 5, 0, 92)
+switchPartBtn.Text = "Cambiar Parte (Head / HRP)"
+switchPartBtn.Font = Enum.Font.SourceSans
+switchPartBtn.TextSize = 14
+switchPartBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+switchPartBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+
+local fovLabel = Instance.new("TextLabel", frame)
+fovLabel.Size = UDim2.new(1, -10, 0, 18)
+fovLabel.Position = UDim2.new(0, 5, 0, 118)
 fovLabel.BackgroundTransparency = 1
-fovLabel.Font = Enum.Font.SourceSans
-fovLabel.TextSize = 14
+fovLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+fovLabel.Text = "FOV: " .. FOV .. " (↑/↓ para ajustar)"
 
--- Ajuste con teclas Up/Down
-UserInputService.InputBegan:Connect(function(input)
-	if input.KeyCode == Enum.KeyCode.Up then
-		FOV = FOV + 50
-		fovLabel.Text = "FOV: "..FOV
-	elseif input.KeyCode == Enum.KeyCode.Down then
-		FOV = math.max(50, FOV - 50)
-		fovLabel.Text = "FOV: "..FOV
-	end
+-- Activar / Desactivar Aimlock
+toggleBtn.MouseButton1Click:Connect(function()
+    enabled = not enabled
+    toggleBtn.Text = enabled and "Desactivar AimLock" or "Activar AimLock"
+    log("AimLock: " .. (enabled and "ACTIVADO" or "DESACTIVADO"))
 end)
 
-print("✅ Menú Aimlock cargado. Usa el botón para activar/desactivar y flechas Up/Down para FOV.")
+-- Cambiar parte (Head / HumanoidRootPart)
+switchPartBtn.MouseButton1Click:Connect(function()
+    if targetPartName == "Head" then targetPartName = "HumanoidRootPart"
+    else targetPartName = "Head" end
+    partLabel.Text = "Parte: " .. targetPartName
+    log("Parte objetivo ahora: " .. targetPartName)
+end)
+
+-- Ajuste FOV con las teclas ↑ y ↓
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.Up then
+        FOV = FOV + 100
+        fovLabel.Text = "FOV: " .. FOV .. " (↑/↓ para ajustar)"
+        log("FOV ajustado a: " .. FOV)
+    elseif input.KeyCode == Enum.KeyCode.Down then
+        FOV = math.max(50, FOV - 100)
+        fovLabel.Text =
+
